@@ -137,8 +137,8 @@ main.write_text(s)
 
 gradle = root / "app/build.gradle"
 g = gradle.read_text()
-g = g.replace("versionCode 8", "versionCode 9", 1)
-g = g.replace("versionName '0.4.2-experimental'", "versionName '0.4.3-experimental'", 1)
+g = g.replace("versionCode 8", "versionCode 10", 1)
+g = g.replace("versionName '0.4.2-experimental'", "versionName '0.4.4-experimental'", 1)
 gradle.write_text(g)
 
 print("v0.4.3 cover usability patch applied")
