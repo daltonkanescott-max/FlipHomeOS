@@ -3,13 +3,7 @@ import sys
 
 root = Path(sys.argv[1])
 
-# Start from the v0.4.2 UI state.
-v042 = Path("ci-patches-v042/apply.py")
-if not v042.exists():
-    raise SystemExit("Missing ci-patches-v042/apply.py")
-exec(compile(v042.read_text(), str(v042), "exec"), {"__name__":"__main__", "sys":sys})
-
-main = root / "app/src/main/java/com/fliphomeos/app/ui/MainActivity.kt"
+# v0.4.2 has already been applied by the workflow.\n\nmain = root / "app/src/main/java/com/fliphomeos/app/ui/MainActivity.kt"
 s = main.read_text()
 
 old_click = """        binding.editBadge.setOnClickListener {
