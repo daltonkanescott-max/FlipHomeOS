@@ -3,7 +3,9 @@ import sys
 
 root = Path(sys.argv[1])
 
-# v0.4.2 has already been applied by the workflow.\n\nmain = root / "app/src/main/java/com/fliphomeos/app/ui/MainActivity.kt"
+# v0.4.2 has already been applied by the workflow.
+
+main = root / "app/src/main/java/com/fliphomeos/app/ui/MainActivity.kt"
 s = main.read_text()
 
 old_click = """        binding.editBadge.setOnClickListener {
