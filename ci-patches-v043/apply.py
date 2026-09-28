@@ -119,8 +119,8 @@ needle = """        binding.editBadge.visibility = View.VISIBLE
         binding.editBadge.setOnClickListener {"""
 replacement = """        binding.editBadge.visibility = View.VISIBLE
         binding.editBadge.text = "EDIT"
-        binding.editBadge.minWidth = (52 * resources.displayMetrics.density).toInt()
-        binding.editBadge.minHeight = (34 * resources.displayMetrics.density).toInt()
+        binding.editBadge.minWidth = (42 * resources.displayMetrics.density).toInt()
+        binding.editBadge.minHeight = (32 * resources.displayMetrics.density).toInt()
         binding.editBadge.setPadding(
             (8 * resources.displayMetrics.density).toInt(),
             0,
