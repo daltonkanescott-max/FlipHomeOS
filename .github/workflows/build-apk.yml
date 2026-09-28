@@ -22,6 +22,14 @@ jobs:
           echo "Project contents:"
           ls -la project
 
+      - name: Apply Flip 5 cover-screen fixes
+        run: |
+          cp ci-patches/AndroidManifest.xml project/app/src/main/AndroidManifest.xml
+          cp ci-patches/CoverWidgetProvider.kt project/app/src/main/java/com/fliphomeos/app/widget/CoverWidgetProvider.kt
+          cp ci-patches/samsung_cover_widget_info.xml project/app/src/main/res/xml/samsung_cover_widget_info.xml
+          sed -i "s/versionCode 1/versionCode 2/" project/app/build.gradle
+          sed -i "s/versionName '0.1.0'/versionName '0.1.1'/" project/app/build.gradle
+
       - name: Set up Java 17
         uses: actions/setup-java@v4
         with:
@@ -32,6 +40,12 @@ jobs:
         uses: gradle/actions/setup-gradle@v4
         with:
           gradle-version: '8.9'
+
+      - name: Keep a stable debug signing key
+        uses: actions/cache@v4
+        with:
+          path: ~/.android/debug.keystore
+          key: fliphomeos-debug-keystore-v1
 
       - name: Install Android SDK 35
         env:
@@ -59,6 +73,6 @@ jobs:
       - name: Upload installable APK
         uses: actions/upload-artifact@v4
         with:
-          name: FlipHomeOS-debug
+          name: FlipHomeOS-debug-v0.1.1
           path: project/app/build/outputs/apk/debug/app-debug.apk
           retention-days: 7
