@@ -1,0 +1,30 @@
+FLIPHOME OS — FREE GITHUB ACTIONS BUILD
+
+1. Go to github.com/new and create a PUBLIC repository named FlipHomeOS.
+   Do not add a README, .gitignore, or license during repository creation.
+
+2. Open the new repository and choose Add file > Upload files.
+
+3. Extract this ZIP on your computer first. Upload ALL files and folders INSIDE this package,
+   including the hidden .github folder. The repository root should contain:
+      .github/
+      app/
+      build.gradle
+      gradle.properties
+      settings.gradle
+
+4. Commit the upload to the main branch.
+
+5. Open the Actions tab. The workflow named "Build Android APK" should start automatically.
+   If it does not, open that workflow and choose Run workflow.
+
+6. When the run is green, open it and scroll to Artifacts.
+   Download "FlipHomeOS-debug". Inside the downloaded ZIP is app-debug.apk.
+
+7. Move app-debug.apk to the Galaxy Z Flip 5 and install it. Android may ask you to allow
+   installs from the browser/files app you used.
+
+IMPORTANT:
+- The repository must be PUBLIC for standard GitHub-hosted Actions runners to be free/unlimited.
+- The APK is a debug build, automatically signed for testing. It is not a Play Store release build.
+- If the build fails, send the failed Actions log to ChatGPT so the project can be fixed.
