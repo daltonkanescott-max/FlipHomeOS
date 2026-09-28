@@ -12,5 +12,5 @@
     <string name="cancel">Cancel</string>
     <string name="save">Save</string>
     <string name="takeover_service_label">FlipHome cover takeover</string>
-    <string name="takeover_service_description">Keeps FlipHome OS as the home experience on the Galaxy Z Flip cover display when the cover screen wakes or Samsung's stock cover UI returns.</string>
+    <string name="takeover_service_description">Keeps FlipHome OS as the home experience on the Galaxy Z Flip cover display when the cover screen wakes or Samsung\'s stock cover UI returns.</string>
 </resources>
