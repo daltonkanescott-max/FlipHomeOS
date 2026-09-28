@@ -8,7 +8,7 @@ on:
 jobs:
   build:
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    timeout-minutes: 25
 
     steps:
       - name: Checkout repository
@@ -19,24 +19,40 @@ jobs:
           rm -rf project
           mkdir project
           unzip -q FlipHomeOS-GitHub-Free-Build.zip -d project
-          echo "Project contents:"
-          ls -la project
 
-      - name: Apply v0.3.1 unlock-safe cover navigation
+      - name: Apply v0.4 launcher features
         run: |
-          cp ci-patches-v031/AndroidManifest.xml project/app/src/main/AndroidManifest.xml
+          rm -rf /tmp/fliphome-v040
+          mkdir -p /tmp/fliphome-v040
+          tar -xzf ci-patches-v040.tar.gz -C /tmp/fliphome-v040
+
+          cp /tmp/fliphome-v040/AndroidManifest.xml project/app/src/main/AndroidManifest.xml
+          cp /tmp/fliphome-v040/build.gradle project/app/build.gradle
+
+          mkdir -p project/app/src/main/java/com/fliphomeos/app/model
+          mkdir -p project/app/src/main/java/com/fliphomeos/app/data
+          mkdir -p project/app/src/main/java/com/fliphomeos/app/ui
           mkdir -p project/app/src/main/java/com/fliphomeos/app/service
+
+          cp /tmp/fliphome-v040/java/model/*.kt project/app/src/main/java/com/fliphomeos/app/model/
+          cp /tmp/fliphome-v040/java/data/*.kt project/app/src/main/java/com/fliphomeos/app/data/
+          cp /tmp/fliphome-v040/java/ui/*.kt project/app/src/main/java/com/fliphomeos/app/ui/
+
           cp ci-patches-v031/CoverTakeoverAccessibilityService.kt project/app/src/main/java/com/fliphomeos/app/service/CoverTakeoverAccessibilityService.kt
           cp ci-patches-v021/CoverDisplayLauncher.kt project/app/src/main/java/com/fliphomeos/app/service/CoverDisplayLauncher.kt
           cp ci-patches-v021/TakeoverSetup.kt project/app/src/main/java/com/fliphomeos/app/service/TakeoverSetup.kt
+
+          cp /tmp/fliphome-v040/res/layout/*.xml project/app/src/main/res/layout/
+          cp /tmp/fliphome-v040/res/values/*.xml project/app/src/main/res/values/
+          cp /tmp/fliphome-v040/res/drawable/*.xml project/app/src/main/res/drawable/
+
           cp ci-patches-v020/cover_takeover_accessibility_service.xml project/app/src/main/res/xml/cover_takeover_accessibility_service.xml
-          cp ci-patches-v020/strings.xml project/app/src/main/res/values/strings.xml
           cp ci-patches/samsung_cover_widget_info.xml project/app/src/main/res/xml/samsung_cover_widget_info.xml
           cp ci-patches/CoverWidgetProvider.kt project/app/src/main/java/com/fliphomeos/app/widget/CoverWidgetProvider.kt
-          python3 -c 'from pathlib import Path; p=Path("project/app/src/main/java/com/fliphomeos/app/ui/MainActivity.kt"); s=p.read_text(); old="            intent.addFlags(Intent.FLAG_ACTIVITY_RESET_TASK_IF_NEEDED)\n            startActivity(intent)"; new="            com.fliphomeos.app.service.CoverDisplayLauncher.launch(this, intent)"; assert old in s, "old app launch block not found"; p.write_text(s.replace(old,new,1))'
-          python3 -c 'from pathlib import Path; p=Path("project/app/src/main/java/com/fliphomeos/app/ui/MainActivity.kt"); s=p.read_text(); old="        updateClock()\n        applyWallpaper()\n        loadHomeApps()\n    }"; new="        updateClock()\n        applyWallpaper()\n        loadHomeApps()\n        handler.postDelayed({\n            com.fliphomeos.app.service.TakeoverSetup.promptIfNeeded(this)\n        }, 500L)\n    }"; assert old in s, "setup insertion point not found"; p.write_text(s.replace(old,new,1))'
-          sed -i "s/versionCode 1/versionCode 6/" project/app/build.gradle
-          sed -i "s/versionName '0.1.0'/versionName '0.3.1-experimental'/" project/app/build.gradle
+
+          echo "FlipHome v0.4 patch applied"
+          grep -n "versionName" project/app/build.gradle
+          grep -n "ViewPager2" project/app/src/main/java/com/fliphomeos/app/ui/MainActivity.kt
 
       - name: Set up Java 17
         uses: actions/setup-java@v4
@@ -61,7 +77,6 @@ jobs:
           ANDROID_SDK_ROOT: /usr/local/lib/android/sdk
         run: |
           SDKMANAGER="$ANDROID_SDK_ROOT/cmdline-tools/latest/bin/sdkmanager"
-          echo "Using: $SDKMANAGER"
           "$SDKMANAGER" --version
           yes | "$SDKMANAGER" --licenses >/dev/null || true
           "$SDKMANAGER" "platforms;android-35" "build-tools;35.0.0" "platform-tools"
@@ -81,6 +96,6 @@ jobs:
       - name: Upload installable APK
         uses: actions/upload-artifact@v4
         with:
-          name: FlipHomeOS-debug-v0.3.1-experimental
+          name: FlipHomeOS-debug-v0.4.0-experimental
           path: project/app/build/outputs/apk/debug/app-debug.apk
           retention-days: 7
