@@ -127,7 +127,7 @@ replacement = """        binding.editBadge.visibility = View.VISIBLE
             (8 * resources.displayMetrics.density).toInt(),
             0
         )
-        binding.editBadge.setBackgroundResource(R.drawable.edit_panel_background)
+        binding.editBadge.setBackgroundResource(com.fliphomeos.app.R.drawable.edit_panel_background)
         binding.editBadge.setOnClickListener {"""
 if needle not in s:
     raise SystemExit("EDIT sizing patch target not found")
