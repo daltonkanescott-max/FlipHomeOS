@@ -20,7 +20,7 @@ jobs:
           mkdir project
           unzip -q FlipHomeOS-GitHub-Free-Build.zip -d project
 
-      - name: Reconstruct v0.4.4 UI and apply v0.5.0 cover runtime
+      - name: Apply v0.5 CoverScreen-style runtime
         run: |
           rm -rf /tmp/fliphome-v040
           mkdir -p /tmp/fliphome-v040
@@ -42,9 +42,6 @@ jobs:
           cp /tmp/fliphome-v040/res/values/*.xml project/app/src/main/res/values/
           cp /tmp/fliphome-v040/res/drawable/*.xml project/app/src/main/res/drawable/
 
-          cp ci-patches/samsung_cover_widget_info.xml project/app/src/main/res/xml/samsung_cover_widget_info.xml
-          cp ci-patches/CoverWidgetProvider.kt project/app/src/main/java/com/fliphomeos/app/widget/CoverWidgetProvider.kt
-
           rm -rf /tmp/fliphome-v042
           mkdir -p /tmp/fliphome-v042
           base64 -d ci-patches-v042.b64 > /tmp/fliphome-v042.tar.gz
@@ -52,23 +49,24 @@ jobs:
           cp /tmp/fliphome-v042/java/ui/MainActivity.kt project/app/src/main/java/com/fliphomeos/app/ui/MainActivity.kt
           cp /tmp/fliphome-v042/res/layout/activity_main.xml project/app/src/main/res/layout/activity_main.xml
 
-          sed -i "s/versionCode 7/versionCode 8/" project/app/build.gradle
-          sed -i "s/versionName '0.4.0-experimental'/versionName '0.4.2-experimental'/" project/app/build.gradle
           python3 ci-patches-v043/apply.py project
 
-          cp ci-patches-v030/CoverDisplayHelper.kt project/app/src/main/java/com/fliphomeos/app/service/CoverDisplayHelper.kt
-          cp ci-patches-v050/CoverTakeoverAccessibilityService.kt project/app/src/main/java/com/fliphomeos/app/service/CoverTakeoverAccessibilityService.kt
+          cp ci-patches-v050/AndroidManifest.xml project/app/src/main/AndroidManifest.xml
+          cp ci-patches-v050/CoverDisplayHelper.kt project/app/src/main/java/com/fliphomeos/app/service/CoverDisplayHelper.kt
+          cp ci-patches-v050/CoverRuntimeService.kt project/app/src/main/java/com/fliphomeos/app/service/CoverRuntimeService.kt
+          cp ci-patches-v050/BootReceiver.kt project/app/src/main/java/com/fliphomeos/app/service/BootReceiver.kt
           cp ci-patches-v050/CoverDisplayLauncher.kt project/app/src/main/java/com/fliphomeos/app/service/CoverDisplayLauncher.kt
-          cp ci-patches-v050/TakeoverSetup.kt project/app/src/main/java/com/fliphomeos/app/service/TakeoverSetup.kt
+          cp ci-patches-v050/CoverTakeoverAccessibilityService.kt project/app/src/main/java/com/fliphomeos/app/service/CoverTakeoverAccessibilityService.kt
+          cp ci-patches-v021/TakeoverSetup.kt project/app/src/main/java/com/fliphomeos/app/service/TakeoverSetup.kt
           cp ci-patches-v050/cover_takeover_accessibility_service.xml project/app/src/main/res/xml/cover_takeover_accessibility_service.xml
+          cp ci-patches/samsung_cover_widget_info.xml project/app/src/main/res/xml/samsung_cover_widget_info.xml
+          cp ci-patches/CoverWidgetProvider.kt project/app/src/main/java/com/fliphomeos/app/widget/CoverWidgetProvider.kt
 
           sed -i "s/versionCode 10/versionCode 11/" project/app/build.gradle
           sed -i "s/versionName '0.4.4-experimental'/versionName '0.5.0-experimental'/" project/app/build.gradle
 
-          echo "FlipHome v0.5.0 patch applied"
+          echo "FlipHome v0.5 patch applied"
           grep -n "versionCode\|versionName" project/app/build.gradle
-          grep -n "MULTIPLE_TASK" project/app/src/main/java/com/fliphomeos/app/service/CoverTakeoverAccessibilityService.kt
-          grep -n "SYSTEM_UI_STABILITY_MS" project/app/src/main/java/com/fliphomeos/app/service/CoverTakeoverAccessibilityService.kt
 
       - name: Set up Java 17
         uses: actions/setup-java@v4
