@@ -3,10 +3,8 @@ package com.fliphomeos.app.service
 import android.accessibilityservice.AccessibilityService
 import android.app.ActivityOptions
 import android.app.KeyguardManager
-import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
-import android.content.IntentFilter
 import android.graphics.Color
 import android.graphics.PixelFormat
 import android.graphics.drawable.GradientDrawable
@@ -20,120 +18,85 @@ import android.view.WindowManager
 import android.view.accessibility.AccessibilityEvent
 import android.widget.LinearLayout
 import android.widget.TextView
+import androidx.core.content.ContextCompat
 import com.fliphomeos.app.ui.MainActivity
 import java.lang.ref.WeakReference
 
+/**
+ * Cover navigation + reliable activity launch bridge.
+ *
+ * SystemUI events are intentionally treated as transient. Earlier FlipHome
+ * builds immediately relaunched Home whenever SystemUI appeared, which caused
+ * the visible One UI -> FlipHome bounce. Home is now explicit via the nav pill
+ * or a real cover wake.
+ */
 class CoverTakeoverAccessibilityService : AccessibilityService() {
 
     private val handler = Handler(Looper.getMainLooper())
     private lateinit var displayHelper: CoverDisplayHelper
 
-    private var lastHomeLaunchAt = 0L
-    private var receiverRegistered = false
-    private var wakeCheckAttempts = 0
-
-    private var suppressSystemUiHomeUntil = 0L
-    private var systemUiCandidateGeneration = 0L
-    private var lastWindowPackage: String? = null
-
     private var navView: View? = null
     private var navWindowManager: WindowManager? = null
-
-    private val screenReceiver = object : BroadcastReceiver() {
-        override fun onReceive(context: Context?, intent: Intent?) {
-            when (intent?.action) {
-                Intent.ACTION_SCREEN_ON -> {
-                    hideNavigation()
-                    beginWakeCheck()
-                }
-
-                Intent.ACTION_USER_PRESENT -> {
-                    handler.removeCallbacks(wakeCheckRunnable)
-                    wakeCheckAttempts = 0
-                    scheduleCoverHome(80L)
-                }
-
-                Intent.ACTION_SCREEN_OFF -> {
-                    handler.removeCallbacks(wakeCheckRunnable)
-                    handler.removeCallbacks(showNavigationRunnable)
-                    handler.removeCallbacks(showNavigationRetryRunnable)
-                    wakeCheckAttempts = 0
-                    invalidateSystemUiCandidate()
-                    hideNavigation()
-                }
-            }
-        }
-    }
+    private var coverAppSessionActive = false
+    private var lastHomeLaunchAt = 0L
 
     override fun onServiceConnected() {
         super.onServiceConnected()
         activeService = WeakReference(this)
         displayHelper = CoverDisplayHelper(this)
 
-        if (!receiverRegistered) {
-            val filter = IntentFilter().apply {
-                addAction(Intent.ACTION_SCREEN_ON)
-                addAction(Intent.ACTION_SCREEN_OFF)
-                addAction(Intent.ACTION_USER_PRESENT)
-            }
-            registerReceiver(screenReceiver, filter, RECEIVER_NOT_EXPORTED)
-            receiverRegistered = true
-        }
+        ContextCompat.startForegroundService(
+            this,
+            Intent(this, CoverRuntimeService::class.java)
+        )
 
-        if (!isDeviceLocked() && isCoverDisplayActive()) {
-            scheduleCoverHome(250L)
-        }
+        handler.postDelayed({
+            if (!isDeviceLocked()) requestCoverHomeInternal(force = false)
+        }, 300L)
     }
 
     override fun onAccessibilityEvent(event: AccessibilityEvent?) {
         event ?: return
-
         if (event.eventType != AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED &&
             event.eventType != AccessibilityEvent.TYPE_WINDOWS_CHANGED) {
             return
         }
 
-        if (isDeviceLocked()) {
-            invalidateSystemUiCandidate()
+        val cover = displayHelper.getCoverDisplay() ?: run {
             hideNavigation()
+            coverAppSessionActive = false
             return
         }
 
-        // Samsung does not always report cover-app events with the correct displayId.
-        // Use the real secondary-display hardware state instead of trusting event.displayId.
-        if (!isCoverDisplayActive()) {
-            invalidateSystemUiCandidate()
+        if (isDeviceLocked()) {
             hideNavigation()
             return
         }
 
         val eventPackage = event.packageName?.toString()?.trim().orEmpty()
         if (eventPackage.isBlank()) return
-        lastWindowPackage = eventPackage
 
         when {
             eventPackage == packageName -> {
-                invalidateSystemUiCandidate()
+                coverAppSessionActive = false
                 hideNavigation()
-            }
-
-            eventPackage == SYSTEM_UI_PACKAGE ||
-                eventPackage.startsWith(SAMSUNG_SYSTEM_UI_PREFIX) -> {
-                hideNavigation()
-                if (SystemClock.elapsedRealtime() >= suppressSystemUiHomeUntil) {
-                    scheduleStableSystemUiReclaim()
-                }
             }
 
             eventPackage in PERMISSION_PACKAGES -> {
-                invalidateSystemUiCandidate()
                 hideNavigation()
             }
 
+            isTransientSystemUi(eventPackage) -> {
+                // Keep navigation available if the user reached Samsung's cover
+                // UI while exiting an app. Do not auto-reclaim here because the
+                // same package also owns notifications/AOD and reclaiming every
+                // SystemUI event steals focus.
+                if (coverAppSessionActive) showNavigation(cover)
+            }
+
             else -> {
-                // Do not wait for another accessibility event before making nav available.
-                invalidateSystemUiCandidate()
-                scheduleNavigation()
+                coverAppSessionActive = true
+                showNavigation(cover)
             }
         }
     }
@@ -142,17 +105,8 @@ class CoverTakeoverAccessibilityService : AccessibilityService() {
 
     override fun onDestroy() {
         handler.removeCallbacksAndMessages(null)
-        invalidateSystemUiCandidate()
         hideNavigation()
-
-        if (receiverRegistered) {
-            runCatching { unregisterReceiver(screenReceiver) }
-            receiverRegistered = false
-        }
-
-        if (activeService?.get() === this) {
-            activeService = null
-        }
+        if (activeService?.get() === this) activeService = null
         super.onDestroy()
     }
 
@@ -161,227 +115,90 @@ class CoverTakeoverAccessibilityService : AccessibilityService() {
         return keyguard?.isDeviceLocked == true
     }
 
-    private fun coverDisplay(): Display? =
-        if (::displayHelper.isInitialized) displayHelper.getCoverDisplay() else null
+    private fun requestCoverHomeInternal(force: Boolean) {
+        if (isDeviceLocked()) return
 
-    private fun isCoverDisplayActive(): Boolean =
-        coverDisplay()?.let { it.state != Display.STATE_OFF } == true
-
-    private fun scheduleCoverHome(delayMs: Long) {
-        handler.removeCallbacks(launchRunnable)
-        handler.postDelayed(launchRunnable, delayMs)
-    }
-
-    private fun beginWakeCheck() {
-        handler.removeCallbacks(wakeCheckRunnable)
-        wakeCheckAttempts = 0
-        handler.postDelayed(wakeCheckRunnable, 180L)
-    }
-
-    private val wakeCheckRunnable = object : Runnable {
-        override fun run() {
-            if (!isDeviceLocked()) {
-                wakeCheckAttempts = 0
-                launchCoverHomeIfAvailable(force = false)
-                return
-            }
-
-            wakeCheckAttempts += 1
-            if (wakeCheckAttempts < MAX_WAKE_CHECKS) {
-                handler.postDelayed(this, WAKE_CHECK_INTERVAL_MS)
-            }
-        }
-    }
-
-    private val launchRunnable = Runnable {
-        launchCoverHomeIfAvailable(force = false)
-    }
-
-    private fun launchCoverHomeIfAvailable(force: Boolean) {
-        if (isDeviceLocked()) {
-            hideNavigation()
-            return
-        }
-
-        val cover = coverDisplay() ?: return
+        val cover = displayHelper.getCoverDisplay() ?: return
         if (cover.state == Display.STATE_OFF) return
 
         val now = SystemClock.elapsedRealtime()
-        if (!force && now - lastHomeLaunchAt < HOME_LAUNCH_COOLDOWN_MS) return
+        if (!force && now - lastHomeLaunchAt < HOME_COOLDOWN_MS) return
         lastHomeLaunchAt = now
-        invalidateSystemUiCandidate()
 
         val intent = Intent(this, MainActivity::class.java).apply {
             action = ACTION_OPEN_COVER_HOME
             addFlags(
                 Intent.FLAG_ACTIVITY_NEW_TASK or
-                    Intent.FLAG_ACTIVITY_CLEAR_TOP or
-                    Intent.FLAG_ACTIVITY_SINGLE_TOP
+                    Intent.FLAG_ACTIVITY_MULTIPLE_TASK or
+                    Intent.FLAG_ACTIVITY_CLEAR_TOP
             )
         }
-
-        val options = ActivityOptions.makeBasic().apply {
-            launchDisplayId = cover.displayId
-        }
-
-        runCatching {
-            startActivity(intent, options.toBundle())
-        }
-    }
-
-    private fun dispatchExternalIntent(intent: Intent): Boolean {
-        if (isDeviceLocked()) return false
-
-        val cover = coverDisplay() ?: return false
-        if (cover.state == Display.STATE_OFF) return false
-
-        intent.addFlags(
-            Intent.FLAG_ACTIVITY_NEW_TASK or
-                Intent.FLAG_ACTIVITY_MULTIPLE_TASK or
-                Intent.FLAG_ACTIVITY_CLEAR_TOP or
-                Intent.FLAG_ACTIVITY_RESET_TASK_IF_NEEDED
-        )
 
         val options = ActivityOptions.makeBasic().apply {
             launchDisplayId = cover.displayId
         }.toBundle()
 
-        val launched = runCatching {
-            // Launch first, then mutate navigation/overlay state. Hiding first can
-            // remove the very privilege Android uses to accept the cover launch.
+        runCatching {
             startActivity(intent, options)
-            true
-        }.getOrDefault(false)
-
-        if (launched) {
-            prepareForExternalAppLaunch()
+            coverAppSessionActive = false
+            hideNavigation()
         }
-        return launched
     }
 
-    private fun prepareForExternalAppLaunch() {
-        suppressSystemUiHomeUntil =
-            SystemClock.elapsedRealtime() + APP_LAUNCH_SYSTEM_UI_GRACE_MS
+    private fun showNavigation(display: Display) {
+        if (navView?.isAttachedToWindow == true) return
 
-        invalidateSystemUiCandidate()
+        hideNavigation()
 
-        // Some apps emit sparse or delayed accessibility events. Explicitly request
-        // nav now so the user is never trapped without Back/Home/Recents.
-        scheduleNavigation()
-    }
-
-    private fun scheduleStableSystemUiReclaim() {
-        val generation = ++systemUiCandidateGeneration
-
-        handler.postDelayed({
-            if (generation != systemUiCandidateGeneration) return@postDelayed
-            if (isDeviceLocked() || !isCoverDisplayActive()) return@postDelayed
-            if (SystemClock.elapsedRealtime() < suppressSystemUiHomeUntil) return@postDelayed
-
-            val pkg = lastWindowPackage.orEmpty()
-            val stillSystemUi =
-                pkg == SYSTEM_UI_PACKAGE || pkg.startsWith(SAMSUNG_SYSTEM_UI_PREFIX)
-
-            if (stillSystemUi) {
-                launchCoverHomeIfAvailable(force = true)
-            }
-        }, SYSTEM_UI_STABILITY_MS)
-    }
-
-    private fun invalidateSystemUiCandidate() {
-        systemUiCandidateGeneration += 1L
-    }
-
-    private fun scheduleNavigation() {
-        handler.removeCallbacks(showNavigationRunnable)
-        handler.removeCallbacks(showNavigationRetryRunnable)
-        handler.postDelayed(showNavigationRunnable, 90L)
-        handler.postDelayed(showNavigationRetryRunnable, 450L)
-    }
-
-    private val showNavigationRunnable = Runnable {
-        showNavigation()
-    }
-
-    private val showNavigationRetryRunnable = Runnable {
-        if (navView == null) showNavigation()
-    }
-
-    private fun showNavigation() {
-        if (navView != null || isDeviceLocked()) return
-
-        val cover = coverDisplay() ?: return
-        if (cover.state == Display.STATE_OFF) return
-
-        val displayContext = createDisplayContext(cover)
-        val windowContext = runCatching {
-            displayContext.createWindowContext(
-                WindowManager.LayoutParams.TYPE_ACCESSIBILITY_OVERLAY,
-                null
-            )
-        }.getOrElse { displayContext }
-
-        val windowManager =
-            windowContext.getSystemService(WindowManager::class.java) ?: return
+        val displayContext = createDisplayContext(display)
+        val windowContext = displayContext.createWindowContext(
+            WindowManager.LayoutParams.TYPE_ACCESSIBILITY_OVERLAY,
+            null
+        )
+        val wm = windowContext.getSystemService(Context.WINDOW_SERVICE) as WindowManager
         val density = windowContext.resources.displayMetrics.density
-
         fun dp(value: Int): Int = (value * density).toInt()
-
-        val background = GradientDrawable().apply {
-            setColor(Color.argb(215, 14, 14, 14))
-            cornerRadius = dp(22).toFloat()
-            setStroke(dp(1), Color.argb(110, 255, 255, 255))
-        }
 
         val container = LinearLayout(windowContext).apply {
             orientation = LinearLayout.HORIZONTAL
             gravity = Gravity.CENTER
-            this.background = background
-            setPadding(dp(4), dp(2), dp(4), dp(2))
-            elevation = dp(10).toFloat()
+            setPadding(dp(3), dp(2), dp(3), dp(2))
+            background = GradientDrawable().apply {
+                setColor(Color.argb(210, 12, 12, 12))
+                cornerRadius = dp(18).toFloat()
+                setStroke(dp(1), Color.argb(110, 255, 255, 255))
+            }
+            elevation = dp(8).toFloat()
         }
 
-        fun navButton(
-            label: String,
-            description: String,
-            action: () -> Unit
-        ): TextView = TextView(windowContext).apply {
-            text = label
-            textSize = 20f
-            setTextColor(Color.WHITE)
-            gravity = Gravity.CENTER
-            contentDescription = description
-            minWidth = dp(46)
-            minHeight = dp(40)
-            setPadding(dp(8), 0, dp(8), 0)
-            setOnClickListener { action() }
-        }
-
-        container.addView(
-            navButton("‹", "Back") {
-                performGlobalAction(GLOBAL_ACTION_BACK)
+        fun button(symbol: String, description: String, action: () -> Unit): TextView =
+            TextView(windowContext).apply {
+                text = symbol
+                textSize = 19f
+                setTextColor(Color.WHITE)
+                gravity = Gravity.CENTER
+                contentDescription = description
+                minWidth = dp(42)
+                minHeight = dp(38)
+                setPadding(dp(6), 0, dp(6), 0)
+                setOnClickListener { action() }
             }
-        )
 
-        container.addView(
-            navButton("●", "FlipHome") {
-                hideNavigation()
-                launchCoverHomeIfAvailable(force = true)
-            }
-        )
+        container.addView(button("‹", "Back") {
+            performGlobalAction(GLOBAL_ACTION_BACK)
+        })
 
-        container.addView(
-            navButton("▦", "Recents") {
-                suppressSystemUiHomeUntil =
-                    SystemClock.elapsedRealtime() + RECENTS_GRACE_MS
-                invalidateSystemUiCandidate()
-                performGlobalAction(GLOBAL_ACTION_RECENTS)
-            }
-        )
+        container.addView(button("●", "FlipHome") {
+            requestCoverHomeInternal(force = true)
+        })
+
+        container.addView(button("▦", "Recents") {
+            performGlobalAction(GLOBAL_ACTION_RECENTS)
+        })
 
         val params = WindowManager.LayoutParams(
             WindowManager.LayoutParams.WRAP_CONTENT,
-            dp(46),
+            dp(44),
             WindowManager.LayoutParams.TYPE_ACCESSIBILITY_OVERLAY,
             WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or
                 WindowManager.LayoutParams.FLAG_NOT_TOUCH_MODAL or
@@ -389,44 +206,44 @@ class CoverTakeoverAccessibilityService : AccessibilityService() {
             PixelFormat.TRANSLUCENT
         ).apply {
             gravity = Gravity.BOTTOM or Gravity.CENTER_HORIZONTAL
-            y = dp(8)
-            title = "FlipHome navigation"
+            y = dp(5)
             layoutInDisplayCutoutMode =
                 WindowManager.LayoutParams.LAYOUT_IN_DISPLAY_CUTOUT_MODE_ALWAYS
+            title = "FlipHome cover navigation"
         }
 
         runCatching {
-            windowManager.addView(container, params)
-            navWindowManager = windowManager
+            wm.addView(container, params)
+            navWindowManager = wm
             navView = container
         }
     }
 
     private fun hideNavigation() {
-        handler.removeCallbacks(showNavigationRunnable)
-        handler.removeCallbacks(showNavigationRetryRunnable)
-
         val view = navView ?: return
-        runCatching {
-            navWindowManager?.removeViewImmediate(view)
-        }
+        runCatching { navWindowManager?.removeViewImmediate(view) }
         navView = null
         navWindowManager = null
     }
 
+    private fun isTransientSystemUi(packageName: String): Boolean {
+        return TRANSIENT_SYSTEM_UI_PREFIXES.any(packageName::startsWith)
+    }
+
     companion object {
+        // Kept for compatibility with the existing setup helper. Actual routing
+        // uses CoverDisplayHelper and does not assume this ID.
+        const val COVER_DISPLAY_ID = 1
         const val ACTION_OPEN_COVER_HOME = "com.fliphomeos.app.OPEN_COVER_HOME"
 
-        private const val SYSTEM_UI_PACKAGE = "com.android.systemui"
-        private const val SAMSUNG_SYSTEM_UI_PREFIX = "com.samsung.systemui"
+        private const val HOME_COOLDOWN_MS = 500L
 
-        private const val HOME_LAUNCH_COOLDOWN_MS = 650L
-        private const val WAKE_CHECK_INTERVAL_MS = 250L
-        private const val MAX_WAKE_CHECKS = 20
-
-        private const val APP_LAUNCH_SYSTEM_UI_GRACE_MS = 1_500L
-        private const val SYSTEM_UI_STABILITY_MS = 650L
-        private const val RECENTS_GRACE_MS = 2_400L
+        private val TRANSIENT_SYSTEM_UI_PREFIXES = arrayOf(
+            "com.android.systemui",
+            "com.samsung.systemui",
+            "com.samsung.android.app.aodservice",
+            "com.sec.android.app.launcher"
+        )
 
         private val PERMISSION_PACKAGES = setOf(
             "com.android.permissioncontroller",
@@ -434,17 +251,33 @@ class CoverTakeoverAccessibilityService : AccessibilityService() {
         )
 
         @Volatile
-        private var activeService:
-            WeakReference<CoverTakeoverAccessibilityService>? = null
+        private var activeService: WeakReference<CoverTakeoverAccessibilityService>? = null
 
-        fun launchIntentOnCover(intent: Intent): Boolean =
-            activeService?.get()?.dispatchExternalIntent(intent) ?: false
+        fun isConnected(): Boolean = activeService?.get() != null
 
-        fun notifyFallbackExternalLaunch() {
-            activeService?.get()?.prepareForExternalAppLaunch()
+        fun startActivityOnDisplay(intent: Intent, displayId: Int): Boolean {
+            val service = activeService?.get() ?: return false
+            val options = ActivityOptions.makeBasic().apply {
+                launchDisplayId = displayId
+            }.toBundle()
+
+            return runCatching {
+                service.startActivity(intent, options)
+                true
+            }.getOrDefault(false)
         }
 
-        fun activeCoverDisplayId(): Int? =
-            activeService?.get()?.coverDisplay()?.displayId
+        fun markCoverAppLaunch() {
+            activeService?.get()?.let { service ->
+                service.coverAppSessionActive = true
+                service.displayHelper.getCoverDisplay()?.let(service::showNavigation)
+            }
+        }
+
+        fun requestCoverHome(reason: String) {
+            activeService?.get()?.handler?.post {
+                activeService?.get()?.requestCoverHomeInternal(force = false)
+            }
+        }
     }
 }
