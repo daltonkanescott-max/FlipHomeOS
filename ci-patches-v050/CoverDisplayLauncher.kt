@@ -5,42 +5,38 @@ import android.app.ActivityOptions
 import android.content.Intent
 import android.view.Display
 
+/**
+ * Routes user-selected apps onto the active cover display.
+ *
+ * NEW_TASK + MULTIPLE_TASK isolates the cover instance from a task that may
+ * already exist on the inner screen. Launching through AccessibilityService
+ * first avoids Android silently dropping a background launch.
+ */
 object CoverDisplayLauncher {
+
     fun launch(activity: Activity, intent: Intent) {
-        val cover = CoverDisplayHelper(activity).getCoverDisplay()
-        val targetDisplayId =
-            cover?.displayId ?: activity.display?.displayId ?: Display.DEFAULT_DISPLAY
+        val displayId = CoverDisplayHelper(activity).getCoverDisplayId()
+            ?: activity.display?.displayId
+            ?: Display.DEFAULT_DISPLAY
 
-        val targetPackage = intent.component?.packageName
-        val isInternalFlipHomeIntent = targetPackage == activity.packageName
+        intent.addFlags(
+            Intent.FLAG_ACTIVITY_NEW_TASK or
+                Intent.FLAG_ACTIVITY_MULTIPLE_TASK or
+                Intent.FLAG_ACTIVITY_CLEAR_TOP
+        )
 
-        if (!isInternalFlipHomeIntent &&
-            CoverTakeoverAccessibilityService.launchIntentOnCover(intent)) {
-            return
+        val dispatched = CoverTakeoverAccessibilityService.startActivityOnDisplay(
+            intent = intent,
+            displayId = displayId
+        )
+
+        if (!dispatched) {
+            val options = ActivityOptions.makeBasic().apply {
+                launchDisplayId = displayId
+            }.toBundle()
+            activity.startActivity(intent, options)
         }
 
-        if (isInternalFlipHomeIntent) {
-            intent.addFlags(
-                Intent.FLAG_ACTIVITY_CLEAR_TOP or
-                    Intent.FLAG_ACTIVITY_SINGLE_TOP
-            )
-        } else {
-            intent.addFlags(
-                Intent.FLAG_ACTIVITY_NEW_TASK or
-                    Intent.FLAG_ACTIVITY_MULTIPLE_TASK or
-                    Intent.FLAG_ACTIVITY_CLEAR_TOP or
-                    Intent.FLAG_ACTIVITY_RESET_TASK_IF_NEEDED
-            )
-        }
-
-        val options = ActivityOptions.makeBasic().apply {
-            launchDisplayId = targetDisplayId
-        }
-
-        activity.startActivity(intent, options.toBundle())
-
-        if (!isInternalFlipHomeIntent) {
-            CoverTakeoverAccessibilityService.notifyFallbackExternalLaunch()
-        }
+        CoverTakeoverAccessibilityService.markCoverAppLaunch()
     }
 }
