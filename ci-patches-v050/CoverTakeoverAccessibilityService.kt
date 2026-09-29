@@ -274,9 +274,12 @@ class CoverTakeoverAccessibilityService : AccessibilityService() {
             }
         }
 
-        fun requestCoverHome(reason: String) {
+        fun isCoverAppSessionActive(): Boolean =
+            activeService?.get()?.coverAppSessionActive == true
+
+        fun requestCoverHome(reason: String, force: Boolean = false) {
             activeService?.get()?.handler?.post {
-                activeService?.get()?.requestCoverHomeInternal(force = false)
+                activeService?.get()?.requestCoverHomeInternal(force = force)
             }
         }
     }
