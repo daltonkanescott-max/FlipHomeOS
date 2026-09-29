@@ -1,26 +1,15 @@
 <?xml version="1.0" encoding="utf-8"?>
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
-
-    <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+    <uses-permission android:name="android.permission.SYSTEM_ALERT_WINDOW" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_SPECIAL_USE" />
+    <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
     <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
-    <uses-permission android:name="android.permission.SYSTEM_ALERT_WINDOW" />
-    <uses-permission android:name="android.permission.REQUEST_IGNORE_BATTERY_OPTIMIZATIONS" />
 
     <queries>
         <intent>
             <action android:name="android.intent.action.MAIN" />
             <category android:name="android.intent.category.LAUNCHER" />
-        </intent>
-        <intent>
-            <action android:name="android.settings.action.MANAGE_OVERLAY_PERMISSION" />
-        </intent>
-        <intent>
-            <action android:name="android.settings.ACCESSIBILITY_SETTINGS" />
-        </intent>
-        <intent>
-            <action android:name="android.settings.APPLICATION_DETAILS_SETTINGS" />
         </intent>
     </queries>
 
@@ -33,16 +22,12 @@
         android:supportsRtl="true"
         android:theme="@style/Theme.FlipHomeOS">
 
-        <activity
-            android:name=".ui.AppPickerActivity"
-            android:exported="false"
-            android:screenOrientation="unspecified" />
+        <activity android:name=".ui.AppPickerActivity" android:exported="false" />
 
         <activity
             android:name=".ui.MainActivity"
             android:exported="true"
-            android:launchMode="singleTop"
-            android:screenOrientation="unspecified">
+            android:launchMode="singleTop">
             <intent-filter>
                 <action android:name="android.intent.action.MAIN" />
                 <category android:name="android.intent.category.LAUNCHER" />
@@ -50,17 +35,17 @@
         </activity>
 
         <service
-            android:name=".service.CoverOverlayService"
+            android:name=".service.CoverHomeService"
             android:enabled="true"
             android:exported="false"
             android:foregroundServiceType="specialUse">
             <property
                 android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE"
-                android:value="Persistent launcher overlay for the foldable cover display" />
+                android:value="Persistent secondary-display launcher overlay" />
         </service>
 
         <service
-            android:name=".service.CoverInputAccessibilityService"
+            android:name=".service.CoverTakeoverAccessibilityService"
             android:enabled="true"
             android:exported="true"
             android:label="@string/takeover_service_label"
@@ -70,15 +55,17 @@
             </intent-filter>
             <meta-data
                 android:name="android.accessibilityservice"
-                android:resource="@xml/cover_accessibility_service" />
+                android:resource="@xml/cover_takeover_accessibility_service" />
         </service>
 
         <receiver
             android:name=".service.BootReceiver"
             android:enabled="true"
-            android:exported="true">
+            android:exported="true"
+            android:directBootAware="true">
             <intent-filter>
                 <action android:name="android.intent.action.BOOT_COMPLETED" />
+                <action android:name="android.intent.action.LOCKED_BOOT_COMPLETED" />
                 <action android:name="android.intent.action.MY_PACKAGE_REPLACED" />
             </intent-filter>
         </receiver>
