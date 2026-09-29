@@ -1,6 +1,7 @@
 name: Export Current FlipHome Source
 
 on:
+  workflow_dispatch:
   push:
     paths:
       - '.github/workflows/export-current-source.yml'
@@ -9,10 +10,12 @@ jobs:
   export:
     runs-on: ubuntu-latest
     timeout-minutes: 10
-    steps:
-      - uses: actions/checkout@v4
 
-      - name: Assemble current v0.4.4 source tree
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Reconstruct current v0.4.4 source
         run: |
           rm -rf project /tmp/fliphome-v040 /tmp/fliphome-v042
           mkdir project
@@ -55,11 +58,11 @@ jobs:
           sed -i "s/versionName '0.4.0-experimental'/versionName '0.4.2-experimental'/" project/app/build.gradle
           python3 ci-patches-v043/apply.py project
 
-          tar -czf current-v044-source.tar.gz -C project .
+          tar -czf current-v044-source.tar.gz             project/app/build.gradle             project/app/src/main
 
-      - name: Upload current source
+      - name: Upload reconstructed source
         uses: actions/upload-artifact@v4
         with:
-          name: FlipHomeOS-current-v0.4.4-source
+          name: FlipHomeOS-v0.4.4-current-source
           path: current-v044-source.tar.gz
           retention-days: 1
