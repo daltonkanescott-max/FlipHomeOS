@@ -1,0 +1,65 @@
+name: Export Current FlipHome Source
+
+on:
+  push:
+    paths:
+      - '.github/workflows/export-current-source.yml'
+
+jobs:
+  export:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Assemble current v0.4.4 source tree
+        run: |
+          rm -rf project /tmp/fliphome-v040 /tmp/fliphome-v042
+          mkdir project
+          unzip -q FlipHomeOS-GitHub-Free-Build.zip -d project
+
+          mkdir -p /tmp/fliphome-v040
+          tar -xzf ci-patches-v040.tar.gz -C /tmp/fliphome-v040
+
+          cp ci-patches-v041/AndroidManifest.xml project/app/src/main/AndroidManifest.xml
+          cp /tmp/fliphome-v040/build.gradle project/app/build.gradle
+
+          mkdir -p project/app/src/main/java/com/fliphomeos/app/model
+          mkdir -p project/app/src/main/java/com/fliphomeos/app/data
+          mkdir -p project/app/src/main/java/com/fliphomeos/app/ui
+          mkdir -p project/app/src/main/java/com/fliphomeos/app/service
+
+          cp /tmp/fliphome-v040/java/model/*.kt project/app/src/main/java/com/fliphomeos/app/model/
+          cp /tmp/fliphome-v040/java/data/*.kt project/app/src/main/java/com/fliphomeos/app/data/
+          cp /tmp/fliphome-v040/java/ui/*.kt project/app/src/main/java/com/fliphomeos/app/ui/
+
+          cp ci-patches-v043/CoverTakeoverAccessibilityService.kt project/app/src/main/java/com/fliphomeos/app/service/CoverTakeoverAccessibilityService.kt
+          cp ci-patches-v021/CoverDisplayLauncher.kt project/app/src/main/java/com/fliphomeos/app/service/CoverDisplayLauncher.kt
+          cp ci-patches-v021/TakeoverSetup.kt project/app/src/main/java/com/fliphomeos/app/service/TakeoverSetup.kt
+
+          cp /tmp/fliphome-v040/res/layout/*.xml project/app/src/main/res/layout/
+          cp /tmp/fliphome-v040/res/values/*.xml project/app/src/main/res/values/
+          cp /tmp/fliphome-v040/res/drawable/*.xml project/app/src/main/res/drawable/
+
+          cp ci-patches-v020/cover_takeover_accessibility_service.xml project/app/src/main/res/xml/cover_takeover_accessibility_service.xml
+          cp ci-patches/samsung_cover_widget_info.xml project/app/src/main/res/xml/samsung_cover_widget_info.xml
+          cp ci-patches/CoverWidgetProvider.kt project/app/src/main/java/com/fliphomeos/app/widget/CoverWidgetProvider.kt
+
+          mkdir -p /tmp/fliphome-v042
+          base64 -d ci-patches-v042.b64 > /tmp/fliphome-v042.tar.gz
+          tar -xzf /tmp/fliphome-v042.tar.gz -C /tmp/fliphome-v042
+          cp /tmp/fliphome-v042/java/ui/MainActivity.kt project/app/src/main/java/com/fliphomeos/app/ui/MainActivity.kt
+          cp /tmp/fliphome-v042/res/layout/activity_main.xml project/app/src/main/res/layout/activity_main.xml
+
+          sed -i "s/versionCode 7/versionCode 8/" project/app/build.gradle
+          sed -i "s/versionName '0.4.0-experimental'/versionName '0.4.2-experimental'/" project/app/build.gradle
+          python3 ci-patches-v043/apply.py project
+
+          tar -czf current-v044-source.tar.gz -C project .
+
+      - name: Upload current source
+        uses: actions/upload-artifact@v4
+        with:
+          name: FlipHomeOS-current-v0.4.4-source
+          path: current-v044-source.tar.gz
+          retention-days: 1
