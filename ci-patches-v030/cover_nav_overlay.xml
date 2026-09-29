@@ -1,0 +1,38 @@
+<?xml version="1.0" encoding="utf-8"?>
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="wrap_content"
+    android:layout_height="42dp"
+    android:background="@drawable/cover_nav_background"
+    android:elevation="12dp"
+    android:gravity="center"
+    android:orientation="horizontal"
+    android:paddingStart="3dp"
+    android:paddingEnd="3dp">
+
+    <TextView
+        android:id="@+id/coverBackButton"
+        android:layout_width="38dp"
+        android:layout_height="match_parent"
+        android:gravity="center"
+        android:text="‹"
+        android:textColor="@color/white"
+        android:textSize="28sp" />
+
+    <TextView
+        android:id="@+id/coverHomeButton"
+        android:layout_width="38dp"
+        android:layout_height="match_parent"
+        android:gravity="center"
+        android:text="●"
+        android:textColor="@color/white"
+        android:textSize="16sp" />
+
+    <TextView
+        android:id="@+id/coverRecentsButton"
+        android:layout_width="38dp"
+        android:layout_height="match_parent"
+        android:gravity="center"
+        android:text="▢"
+        android:textColor="@color/white"
+        android:textSize="20sp" />
+</LinearLayout>
