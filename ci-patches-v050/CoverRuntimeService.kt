@@ -31,16 +31,20 @@ class CoverRuntimeService : Service() {
     private var screenReceiverRegistered = false
 
     private val displayListener = object : DisplayManager.DisplayListener {
-        override fun onDisplayAdded(displayId: Int) = scheduleHomeIfCoverActive(250L)
+        override fun onDisplayAdded(displayId: Int) =
+            scheduleHomeIfCoverActive(250L, force = false)
+
         override fun onDisplayRemoved(displayId: Int) = Unit
-        override fun onDisplayChanged(displayId: Int) = scheduleHomeIfCoverActive(350L)
+
+        override fun onDisplayChanged(displayId: Int) =
+            scheduleHomeIfCoverActive(350L, force = false)
     }
 
     private val screenReceiver = object : BroadcastReceiver() {
         override fun onReceive(context: Context?, intent: Intent?) {
             when (intent?.action) {
-                Intent.ACTION_SCREEN_ON -> scheduleHomeIfCoverActive(180L)
-                Intent.ACTION_USER_PRESENT -> scheduleHomeIfCoverActive(80L)
+                Intent.ACTION_SCREEN_ON -> scheduleHomeIfCoverActive(180L, force = true)
+                Intent.ACTION_USER_PRESENT -> scheduleHomeIfCoverActive(80L, force = true)
                 Intent.ACTION_SCREEN_OFF -> handler.removeCallbacksAndMessages(null)
             }
         }
@@ -56,11 +60,11 @@ class CoverRuntimeService : Service() {
 
         displayManager.registerDisplayListener(displayListener, handler)
         registerScreenReceiver()
-        scheduleHomeIfCoverActive(350L)
+        scheduleHomeIfCoverActive(350L, force = false)
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
-        scheduleHomeIfCoverActive(120L)
+        scheduleHomeIfCoverActive(120L, force = false)
         return START_STICKY
     }
 
@@ -75,15 +79,32 @@ class CoverRuntimeService : Service() {
 
     override fun onBind(intent: Intent?): IBinder? = null
 
-    private fun scheduleHomeIfCoverActive(delayMs: Long) {
+    private var pendingForceHome = false
+
+    private fun scheduleHomeIfCoverActive(delayMs: Long, force: Boolean) {
+        pendingForceHome = pendingForceHome || force
         handler.removeCallbacks(showHomeRunnable)
         handler.postDelayed(showHomeRunnable, delayMs)
     }
 
     private val showHomeRunnable = Runnable {
+        val force = pendingForceHome
+        pendingForceHome = false
+
         val cover = displayHelper.getCoverDisplay() ?: return@Runnable
         if (cover.state == Display.STATE_OFF) return@Runnable
-        CoverTakeoverAccessibilityService.requestCoverHome("runtime_wake")
+
+        // Display topology/state callbacks also fire while launching apps. Do not
+        // interpret those as "return Home" or the launcher will jump over a movie,
+        // call, game, etc. A real screen wake is allowed to reset the session.
+        if (!force && CoverTakeoverAccessibilityService.isCoverAppSessionActive()) {
+            return@Runnable
+        }
+
+        CoverTakeoverAccessibilityService.requestCoverHome(
+            reason = if (force) "screen_wake" else "display_change",
+            force = force
+        )
     }
 
     private fun registerScreenReceiver() {
