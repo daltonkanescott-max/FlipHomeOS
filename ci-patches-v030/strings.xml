@@ -1,0 +1,16 @@
+<resources>
+    <string name="app_name">FlipHome OS</string>
+    <string name="widget_title">FlipHome OS</string>
+    <string name="widget_subtitle">Open FlipHome cover launcher</string>
+    <string name="edit_mode">EDIT MODE</string>
+    <string name="apps">Apps</string>
+    <string name="wallpaper">Wall</string>
+    <string name="grid">Grid</string>
+    <string name="done">Done</string>
+    <string name="choose_apps">Choose home apps</string>
+    <string name="search_apps">Search apps…</string>
+    <string name="cancel">Cancel</string>
+    <string name="save">Save</string>
+    <string name="takeover_service_label">FlipHome cover controls</string>
+    <string name="takeover_service_description">Lets FlipHome manage cover-screen navigation and launch apps on the foldable cover display.</string>
+</resources>
