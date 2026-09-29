@@ -52,6 +52,11 @@ class CoverHomeOverlayHost(
         }
     }
 
+    fun isShowingOn(displayId: Int): Boolean =
+        root?.isAttachedToWindow == true &&
+            root?.visibility == View.VISIBLE &&
+            attachedDisplayId == displayId
+
     fun show(display: Display) {
         if (root?.isAttachedToWindow == true && attachedDisplayId == display.displayId) {
             root?.visibility = View.VISIBLE
