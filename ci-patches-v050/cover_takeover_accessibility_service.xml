@@ -6,6 +6,6 @@
     android:canPerformGestures="true"
     android:canRequestFilterKeyEvents="true"
     android:canRetrieveWindowContent="false"
-    android:notificationTimeout="150"
     android:description="@string/takeover_service_description"
+    android:notificationTimeout="150"
     android:settingsActivity="com.fliphomeos.app.ui.MainActivity" />
