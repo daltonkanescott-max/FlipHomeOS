@@ -27,7 +27,7 @@ class CoverTakeoverAccessibilityService : AccessibilityService() {
 
     private var navView: View? = null
     private var navWindowManager: WindowManager? = null
-    private lateinit var homeOverlay: CoverHomeOverlay
+    private lateinit var homeOverlay: CoverHomeOverlayHost
     private var suppression = OverlaySuppressionState()
     private var lastHomeLaunchAt = 0L
 
@@ -35,7 +35,7 @@ class CoverTakeoverAccessibilityService : AccessibilityService() {
         super.onServiceConnected()
         activeService = WeakReference(this)
         displayHelper = CoverDisplayHelper(this)
-        homeOverlay = CoverHomeOverlay(
+        homeOverlay = CoverHomeOverlayHost(
             service = this,
             onLaunch = { app ->
                 val launchIntent = packageManager.getLaunchIntentForPackage(app.packageName)
