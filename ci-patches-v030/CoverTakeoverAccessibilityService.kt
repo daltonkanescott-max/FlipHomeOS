@@ -2,91 +2,51 @@ package com.fliphomeos.app.service
 
 import android.accessibilityservice.AccessibilityService
 import android.app.ActivityOptions
-import android.content.BroadcastReceiver
-import android.content.Context
 import android.content.Intent
-import android.content.IntentFilter
-import android.graphics.Color
-import android.graphics.PixelFormat
-import android.graphics.drawable.GradientDrawable
-import android.hardware.display.DisplayManager
 import android.os.Handler
 import android.os.Looper
 import android.os.SystemClock
 import android.view.Display
-import android.view.Gravity
-import android.view.View
-import android.view.WindowManager
 import android.view.accessibility.AccessibilityEvent
-import android.widget.LinearLayout
-import android.widget.TextView
-import com.fliphomeos.app.ui.MainActivity
+import androidx.core.content.ContextCompat
+import java.lang.ref.WeakReference
 
 class CoverTakeoverAccessibilityService : AccessibilityService() {
-
     private val handler = Handler(Looper.getMainLooper())
-    private var lastLaunchAt = 0L
-    private var receiverRegistered = false
-
-    private var navView: View? = null
-    private var navWindowManager: WindowManager? = null
-
-    private val screenReceiver = object : BroadcastReceiver() {
-        override fun onReceive(context: Context?, intent: Intent?) {
-            when (intent?.action) {
-                Intent.ACTION_SCREEN_ON,
-                Intent.ACTION_USER_PRESENT -> scheduleCoverHome(90L)
-
-                Intent.ACTION_SCREEN_OFF -> hideNavigation()
-            }
-        }
-    }
+    private var reclaimGeneration = 0L
+    private var lastUserAppAt = 0L
 
     override fun onServiceConnected() {
         super.onServiceConnected()
-
-        if (!receiverRegistered) {
-            val filter = IntentFilter().apply {
-                addAction(Intent.ACTION_SCREEN_ON)
-                addAction(Intent.ACTION_SCREEN_OFF)
-                addAction(Intent.ACTION_USER_PRESENT)
-            }
-            registerReceiver(screenReceiver, filter, RECEIVER_NOT_EXPORTED)
-            receiverRegistered = true
-        }
-
-        scheduleCoverHome(250L)
+        activeService = WeakReference(this)
+        ContextCompat.startForegroundService(
+            this,
+            Intent(this, CoverHomeService::class.java).setAction(CoverHomeService.ACTION_START)
+        )
     }
 
     override fun onAccessibilityEvent(event: AccessibilityEvent?) {
         event ?: return
+        if (event.eventType != AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED) return
 
-        if (event.eventType != AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED &&
-            event.eventType != AccessibilityEvent.TYPE_WINDOWS_CHANGED) {
+        val packageName = event.packageName?.toString()?.trim().orEmpty()
+        if (packageName.isBlank() || packageName == this.packageName) return
+
+        val coverId = CoverHomeService.currentCoverDisplayId()
+        if (coverId != Display.INVALID_DISPLAY &&
+            event.displayId != Display.INVALID_DISPLAY &&
+            event.displayId != coverId) {
             return
         }
 
-        if (event.displayId != COVER_DISPLAY_ID) return
+        if (isUserApp(packageName)) {
+            lastUserAppAt = SystemClock.elapsedRealtime()
+            reclaimGeneration++
+            return
+        }
 
-        val eventPackage = event.packageName?.toString() ?: return
-
-        when {
-            eventPackage == packageName -> {
-                hideNavigation()
-            }
-
-            eventPackage == SYSTEM_UI_PACKAGE -> {
-                hideNavigation()
-                scheduleCoverHome(90L)
-            }
-
-            eventPackage in PERMISSION_PACKAGES -> {
-                hideNavigation()
-            }
-
-            else -> {
-                handler.postDelayed({ showNavigation() }, 100L)
-            }
+        if (packageName.startsWith(SAMSUNG_LAUNCHER)) {
+            scheduleStableReclaim(450L)
         }
     }
 
@@ -94,152 +54,61 @@ class CoverTakeoverAccessibilityService : AccessibilityService() {
 
     override fun onDestroy() {
         handler.removeCallbacksAndMessages(null)
-        hideNavigation()
-
-        if (receiverRegistered) {
-            runCatching { unregisterReceiver(screenReceiver) }
-            receiverRegistered = false
-        }
+        if (activeService?.get() === this) activeService = null
         super.onDestroy()
     }
 
-    private fun scheduleCoverHome(delayMs: Long) {
-        handler.removeCallbacks(launchRunnable)
-        handler.postDelayed(launchRunnable, delayMs)
+    private fun scheduleStableReclaim(delayMs: Long) {
+        val generation = ++reclaimGeneration
+        handler.postDelayed({
+            if (generation != reclaimGeneration) return@postDelayed
+            val userAppAge = SystemClock.elapsedRealtime() - lastUserAppAt
+            if (userAppAge < 350L) return@postDelayed
+            CoverHomeService.requestShowHome("stable_launcher_signal")
+        }, delayMs)
     }
 
-    private val launchRunnable = Runnable {
-        launchCoverHomeIfAvailable(force = false)
-    }
-
-    private fun launchCoverHomeIfAvailable(force: Boolean) {
-        val displayManager = getSystemService(DisplayManager::class.java)
-        val coverDisplay = displayManager?.getDisplay(COVER_DISPLAY_ID) ?: return
-        if (coverDisplay.state == Display.STATE_OFF) return
-
-        val now = SystemClock.elapsedRealtime()
-        if (!force && now - lastLaunchAt < LAUNCH_COOLDOWN_MS) return
-        lastLaunchAt = now
-
-        val intent = Intent(this, MainActivity::class.java).apply {
-            action = ACTION_OPEN_COVER_HOME
-            addFlags(
-                Intent.FLAG_ACTIVITY_NEW_TASK or
-                    Intent.FLAG_ACTIVITY_CLEAR_TOP or
-                    Intent.FLAG_ACTIVITY_SINGLE_TOP
-            )
-        }
-
-        val options = ActivityOptions.makeBasic().apply {
-            launchDisplayId = COVER_DISPLAY_ID
-        }
-
-        runCatching {
-            startActivity(intent, options.toBundle())
-        }
-    }
-
-    private fun showNavigation() {
-        if (navView != null) return
-
-        val displayManager = getSystemService(DisplayManager::class.java)
-        val coverDisplay = displayManager?.getDisplay(COVER_DISPLAY_ID) ?: return
-        if (coverDisplay.state == Display.STATE_OFF) return
-
-        val displayContext = createDisplayContext(coverDisplay)
-        val windowManager = displayContext.getSystemService(WindowManager::class.java) ?: return
-        val density = displayContext.resources.displayMetrics.density
-
-        fun dp(value: Int): Int = (value * density).toInt()
-
-        val background = GradientDrawable().apply {
-            setColor(Color.argb(170, 20, 20, 20))
-            cornerRadius = dp(18).toFloat()
-            setStroke(dp(1), Color.argb(90, 255, 255, 255))
-        }
-
-        val container = LinearLayout(displayContext).apply {
-            orientation = LinearLayout.HORIZONTAL
-            gravity = Gravity.CENTER
-            this.background = background
-            setPadding(dp(3), dp(2), dp(3), dp(2))
-            elevation = dp(8).toFloat()
-        }
-
-        fun navButton(label: String, description: String, action: () -> Unit): TextView {
-            return TextView(displayContext).apply {
-                text = label
-                textSize = 17f
-                setTextColor(Color.WHITE)
-                gravity = Gravity.CENTER
-                contentDescription = description
-                minWidth = dp(34)
-                minHeight = dp(32)
-                setPadding(dp(5), 0, dp(5), 0)
-                setOnClickListener { action() }
-            }
-        }
-
-        container.addView(
-            navButton("‹", "Back") {
-                performGlobalAction(GLOBAL_ACTION_BACK)
-            }
-        )
-
-        container.addView(
-            navButton("●", "FlipHome") {
-                hideNavigation()
-                launchCoverHomeIfAvailable(force = true)
-            }
-        )
-
-        container.addView(
-            navButton("▦", "Recents") {
-                performGlobalAction(GLOBAL_ACTION_RECENTS)
-            }
-        )
-
-        val params = WindowManager.LayoutParams(
-            WindowManager.LayoutParams.WRAP_CONTENT,
-            dp(38),
-            WindowManager.LayoutParams.TYPE_ACCESSIBILITY_OVERLAY,
-            WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or
-                WindowManager.LayoutParams.FLAG_NOT_TOUCH_MODAL or
-                WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN,
-            PixelFormat.TRANSLUCENT
-        ).apply {
-            gravity = Gravity.BOTTOM or Gravity.START
-            x = dp(6)
-            y = dp(7)
-            title = "FlipHome navigation"
-        }
-
-        runCatching {
-            windowManager.addView(container, params)
-            navWindowManager = windowManager
-            navView = container
-        }
-    }
-
-    private fun hideNavigation() {
-        val view = navView ?: return
-        runCatching {
-            navWindowManager?.removeViewImmediate(view)
-        }
-        navView = null
-        navWindowManager = null
+    private fun isUserApp(packageName: String): Boolean {
+        return !packageName.startsWith("com.android.systemui") &&
+            !packageName.startsWith("com.samsung.systemui") &&
+            !packageName.startsWith("com.samsung.android.app.aodservice") &&
+            !packageName.startsWith(SAMSUNG_LAUNCHER)
     }
 
     companion object {
-        const val COVER_DISPLAY_ID = 1
-        const val ACTION_OPEN_COVER_HOME = "com.fliphomeos.app.OPEN_COVER_HOME"
+        private const val SAMSUNG_LAUNCHER = "com.sec.android.app.launcher"
 
-        private const val SYSTEM_UI_PACKAGE = "com.android.systemui"
-        private const val LAUNCH_COOLDOWN_MS = 650L
+        @Volatile
+        private var activeService: WeakReference<CoverTakeoverAccessibilityService>? = null
 
-        private val PERMISSION_PACKAGES = setOf(
-            "com.android.permissioncontroller",
-            "com.google.android.permissioncontroller"
-        )
+        fun isConnected(): Boolean = activeService?.get() != null
+
+        fun launchPackageOnDisplay(
+            contextIntent: Intent,
+            displayId: Int
+        ): Boolean {
+            val service = activeService?.get() ?: return false
+
+            contextIntent.addFlags(
+                Intent.FLAG_ACTIVITY_NEW_TASK or
+                    Intent.FLAG_ACTIVITY_MULTIPLE_TASK or
+                    Intent.FLAG_ACTIVITY_CLEAR_TOP
+            )
+
+            val options = ActivityOptions.makeBasic().apply {
+                launchDisplayId = displayId
+            }.toBundle()
+
+            return runCatching {
+                service.startActivity(contextIntent, options)
+                true
+            }.getOrDefault(false)
+        }
+
+        fun performBack(): Boolean =
+            activeService?.get()?.performGlobalAction(GLOBAL_ACTION_BACK) ?: false
+
+        fun performRecents(): Boolean =
+            activeService?.get()?.performGlobalAction(GLOBAL_ACTION_RECENTS) ?: false
     }
 }
