@@ -1,7 +1,6 @@
 package com.fliphomeos.app.service
 
 import android.accessibilityservice.AccessibilityService
-import android.app.ActivityOptions
 import android.app.KeyguardManager
 import android.content.Context
 import android.content.Intent
@@ -20,7 +19,6 @@ import android.widget.LinearLayout
 import android.widget.TextView
 import androidx.core.content.ContextCompat
 import com.fliphomeos.app.ui.MainActivity
-import com.fliphomeos.app.model.AppEntry
 import java.lang.ref.WeakReference
 
 class CoverTakeoverAccessibilityService : AccessibilityService() {
@@ -29,7 +27,7 @@ class CoverTakeoverAccessibilityService : AccessibilityService() {
 
     private var navView: View? = null
     private var navWindowManager: WindowManager? = null
-    private lateinit var homeHost: CoverHomeOverlayHost
+    private lateinit var homeOverlay: CoverHomeOverlay
     private var suppression = OverlaySuppressionState()
     private var lastHomeLaunchAt = 0L
 
@@ -37,17 +35,37 @@ class CoverTakeoverAccessibilityService : AccessibilityService() {
         super.onServiceConnected()
         activeService = WeakReference(this)
         displayHelper = CoverDisplayHelper(this)
-        homeHost = CoverHomeOverlayHost(this, ::launchCoverApp)
+        homeOverlay = CoverHomeOverlay(
+            service = this,
+            onLaunch = { app ->
+                val launchIntent = packageManager.getLaunchIntentForPackage(app.packageName)
+                val cover = displayHelper.getCoverDisplay()
+                if (launchIntent != null && cover != null &&
+                    CoverLaunchCoordinator.launchFromAccessibility(this, launchIntent, cover.displayId)
+                ) {
+                    homeOverlay.hide()
+                }
+            },
+            onOpenSettings = {
+                performGlobalAction(GLOBAL_ACTION_HOME)
+                val settingsIntent = Intent(this, MainActivity::class.java).apply {
+                    addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP)
+                }
+                runCatching { startActivity(settingsIntent) }
+            }
+        )
 
         ContextCompat.startForegroundService(
             this,
             Intent(this, CoverRuntimeService::class.java)
         )
 
-        // The cover home itself is allowed while keyguard is active. Lock state
-        // only affects protected app launches; suppressing Home here made a
-        // freshly awakened Flex Window permanently blank.
-        handler.postDelayed({ requestCoverHomeInternal(false) }, 300L)
+        if (isDeviceLocked()) {
+            suppress(OverlaySuppressionReason.DEVICE_LOCKED)
+        } else {
+            clearSuppression(OverlaySuppressionReason.DEVICE_LOCKED)
+            handler.postDelayed({ requestCoverHomeInternal(false) }, 300L)
+        }
     }
 
     override fun onAccessibilityEvent(event: AccessibilityEvent?) {
@@ -60,12 +78,27 @@ class CoverTakeoverAccessibilityService : AccessibilityService() {
             return
         }
 
+        if (isDeviceLocked()) {
+            suppress(OverlaySuppressionReason.DEVICE_LOCKED)
+            hideNavigation()
+            if (::homeOverlay.isInitialized) homeOverlay.hide()
+            return
+        } else {
+            clearSuppression(OverlaySuppressionReason.DEVICE_LOCKED)
+        }
+
         val eventPackage = event.packageName?.toString()?.trim().orEmpty()
         if (eventPackage.isBlank()) return
 
         when {
             eventPackage == packageName -> {
-                hideNavigation()
+                if (suppression.reason == OverlaySuppressionReason.APP_LAUNCH &&
+                    ::homeOverlay.isInitialized &&
+                    homeOverlay.isShowingOn(cover.displayId)
+                ) {
+                    clearSuppression(OverlaySuppressionReason.APP_LAUNCH)
+                    hideNavigation()
+                }
             }
 
             eventPackage in PERMISSION_PACKAGES -> hideNavigation()
@@ -88,7 +121,7 @@ class CoverTakeoverAccessibilityService : AccessibilityService() {
     override fun onDestroy() {
         handler.removeCallbacksAndMessages(null)
         hideNavigation()
-        if (::homeHost.isInitialized) homeHost.destroy()
+        if (::homeOverlay.isInitialized) homeOverlay.destroy()
         if (activeService?.get() === this) activeService = null
         super.onDestroy()
     }
@@ -105,6 +138,11 @@ class CoverTakeoverAccessibilityService : AccessibilityService() {
     }
 
     private fun requestCoverHomeInternal(force: Boolean) {
+        if (isDeviceLocked()) {
+            suppress(OverlaySuppressionReason.DEVICE_LOCKED)
+            return
+        }
+
         if (suppression.reason == OverlaySuppressionReason.TEMPORARILY_DISABLED && !force) return
         if (suppression.reason == OverlaySuppressionReason.INCOMING_CALL && !force) return
         if (suppression.reason == OverlaySuppressionReason.APP_LAUNCH && !force) return
@@ -117,43 +155,20 @@ class CoverTakeoverAccessibilityService : AccessibilityService() {
         lastHomeLaunchAt = now
 
         runCatching {
-            homeHost.show(cover)
+            homeOverlay.show(cover)
             suppression = OverlaySuppressionState()
             hideNavigation()
         }
     }
 
-    private fun launchCoverApp(app: AppEntry) {
-        val cover = displayHelper.getCoverDisplay() ?: return
-        val intent = packageManager.getLaunchIntentForPackage(app.packageName) ?: return
-
-        val launched = CoverLaunchCoordinator.launchFromAccessibility(
-            service = this,
-            intent = intent,
-            displayId = cover.displayId
-        )
-
-        if (launched) {
-            homeHost.hide()
-        }
-    }
-
-    internal fun openSettingsOnMainDisplay() {
-        val intent = Intent(this, MainActivity::class.java).apply {
-            addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP)
-        }
-        runCatching { startActivity(intent) }
-    }
-
     internal fun onExternalCoverAppLaunched() {
         suppress(OverlaySuppressionReason.APP_LAUNCH)
-        if (::homeHost.isInitialized) homeHost.hide()
+        if (::homeOverlay.isInitialized) homeOverlay.hide()
         displayHelper.getCoverDisplay()?.let(::showNavigation)
     }
 
     private fun temporarilyDisable() {
         suppress(OverlaySuppressionReason.TEMPORARILY_DISABLED)
-        if (::homeHost.isInitialized) homeHost.hide()
         hideNavigation()
         performGlobalAction(GLOBAL_ACTION_HOME)
     }
@@ -281,8 +296,16 @@ class CoverTakeoverAccessibilityService : AccessibilityService() {
             activeService?.get()?.suppression?.reason == OverlaySuppressionReason.APP_LAUNCH
 
         fun onLockStatePolled(locked: Boolean) {
-            // Intentionally do not suppress the launcher when keyguard becomes
-            // active. The Flex Window normally wakes in a locked state.
+            activeService?.get()?.handler?.post {
+                val service = activeService?.get() ?: return@post
+                if (locked) {
+                    service.suppress(OverlaySuppressionReason.DEVICE_LOCKED)
+                    service.hideNavigation()
+                    if (service::homeOverlay.isInitialized) service.homeOverlay.hide()
+                } else {
+                    service.clearSuppression(OverlaySuppressionReason.DEVICE_LOCKED)
+                }
+            }
         }
 
         fun requestCoverHome(reason: String, force: Boolean = false) {
