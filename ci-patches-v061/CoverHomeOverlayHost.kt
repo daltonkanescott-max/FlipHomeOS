@@ -30,7 +30,8 @@ import java.time.format.DateTimeFormatter
  */
 class CoverHomeOverlayHost(
     private val service: CoverTakeoverAccessibilityService,
-    private val onLaunch: (AppEntry) -> Unit
+    private val onLaunch: (AppEntry) -> Unit,
+    private val onOpenSettings: () -> Unit
 ) {
     private val repository = AppRepository(service)
     private val prefs = HomePreferences(service)
@@ -110,7 +111,7 @@ class CoverHomeOverlayHost(
             setOnClickListener {
                 // The Activity remains the full settings/editor surface on the
                 // inner screen. Home itself no longer depends on that Activity.
-                service.openSettingsOnMainDisplay()
+                onOpenSettings()
             }
         }
         header.addView(all)
@@ -187,9 +188,9 @@ class CoverHomeOverlayHost(
 
         scroll.addView(
             grid,
-            ScrollView.LayoutParams(
-                ScrollView.LayoutParams.MATCH_PARENT,
-                ScrollView.LayoutParams.WRAP_CONTENT
+            android.widget.FrameLayout.LayoutParams(
+                android.widget.FrameLayout.LayoutParams.MATCH_PARENT,
+                android.widget.FrameLayout.LayoutParams.WRAP_CONTENT
             )
         )
         container.addView(
